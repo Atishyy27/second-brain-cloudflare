@@ -33,6 +33,10 @@ const EXPECTED_TOOLS = [
   "link",
   "unlink",
   "connections",
+  "add_task",
+  "list_tasks",
+  "complete_task",
+  "update_task",
 ];
 
 async function withMcpClient(env: Env, run: (client: Client) => Promise<void>) {

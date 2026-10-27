@@ -10,6 +10,7 @@ import { handleGraphRoutes } from "./graph";
 import { handleIntegrationsRoutes } from "./integrations";
 import { handleAdminRoutes } from "./admin";
 import { handleBriefRoutes } from "./brief";
+import { handleTasksRoutes } from "./tasks";
 import { handleConfigRoutes } from "./config";
 import { handleMigrationRoutes } from "./migration";
 import { handleOAuthRevokeRoutes } from "./oauth-revoke";
@@ -30,6 +31,7 @@ const routeHandlers: RouteHandler[] = [
   handleIntegrationsRoutes,
   handleAdminRoutes,
   handleBriefRoutes,
+  handleTasksRoutes,
   handleConfigRoutes,
   handleMigrationRoutes,
   handleOAuthRevokeRoutes,

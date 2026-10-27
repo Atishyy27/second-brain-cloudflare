@@ -128,6 +128,17 @@ const SCHEMA_OBJECTS: Record<string, string> = {
   idx_admin_events_created: `CREATE INDEX IF NOT EXISTS idx_admin_events_created ON admin_events(created_at DESC)`,
   // Single-row table driving the nightly round-robin over workspaces.
   maintenance_cursor: `CREATE TABLE IF NOT EXISTS maintenance_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), workspace_id TEXT NOT NULL DEFAULT '', advanced_at INTEGER NOT NULL DEFAULT 0)`,
+  // Task layer (v1). Additive — memory-only brains never read it and rollback is a no-op.
+  // A task carries mutable state (done/due/priority) a memory does not, and is ranked by
+  // priority rather than recall's recency decay, so it lives outside entries and never
+  // enters Vectorize. Kept byte-for-byte in step with db/schema.sql (graph-read-budget
+  // and db-init parity tests compare the two).
+  tasks: `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', priority INTEGER NOT NULL DEFAULT 2, due_at INTEGER, source_entry_id TEXT, project TEXT, workspace_id TEXT NOT NULL DEFAULT '', actor_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER, meta TEXT NOT NULL DEFAULT '{}')`,
+  // The priority view orders by (status, priority ASC, due_at) within a workspace — P0 first;
+  // without this SQLite temp-sorts the whole table before the LIMIT. Same reasoning as
+  // idx_edges_weight. Declared priority DESC and reverse-scanned for the ASC view, so no
+  // index rebuild is needed on brains created before the P0-is-highest flip.
+  idx_tasks_view: `CREATE INDEX IF NOT EXISTS idx_tasks_view ON tasks(workspace_id, status, priority DESC, due_at)`,
 };
 
 /**

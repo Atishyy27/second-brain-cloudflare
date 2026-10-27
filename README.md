@@ -86,6 +86,10 @@ If Vectorize is unavailable, captures and keyword recall continue working. Your 
 | `unlink` | Remove a relationship between two memories |
 | `connections` | List the memories connected to a memory |
 | `share` | Move a memory between the Personal and Shared layers |
+| `add_task` | Create a task (a commitment to act on, ranked by priority, stored apart from memories) |
+| `list_tasks` | List tasks by priority — the do-next view |
+| `complete_task` | Mark a task done (kept, not deleted) |
+| `update_task` | Change a task's title, priority, due date, project, or status |
 
 On a team brain, memory tools accept a `workspace` of `personal` or `company` when you want to choose a layer explicitly. `company` is the wire value for the Shared team layer. Without `workspace`, captures use the member and team defaults, while recall searches everything that person is allowed to see.
 

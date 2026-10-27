@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>CNC Action Items</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#171a21; --card2:#1e222b; --line:#2a2f3a;
+    --tx:#e7e9ee; --mut:#9aa3b2; --acc:#5b8cff; --p0:#ff5d5d; --p1:#ffb020; --p2:#4fd1c5; --p3:#7c8598;
+    --done:#3a4150;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{position:sticky;top:0;background:linear-gradient(180deg,var(--bg) 70%,transparent);padding:16px 16px 10px;z-index:5}
+  h1{margin:0;font-size:19px;letter-spacing:.2px}
+  .sub{color:var(--mut);font-size:12.5px;margin-top:3px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  button,input{font:inherit}
+  button{background:var(--card2);color:var(--tx);border:1px solid var(--line);border-radius:10px;padding:9px 12px;cursor:pointer}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+  button:active{transform:translateY(1px)}
+  input{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 11px;color:var(--tx);min-width:0;flex:1}
+  main{padding:0 16px 40px;max-width:720px;margin:0 auto}
+  .status{font-size:12.5px;color:var(--mut);margin:8px 0 4px}
+  .group{margin-top:18px}
+  .group h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mut);margin:0 0 8px;display:flex;justify-content:space-between}
+  .group h2 .n{color:var(--p0)}
+  .task{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--p0);border-radius:12px;padding:11px 13px;margin-bottom:8px}
+  .task.p3{border-left-color:var(--p3)} .task.p2{border-left-color:var(--p2)} .task.p1{border-left-color:var(--p1)}
+  .task.done{opacity:.5}
+  .t-top{display:flex;align-items:baseline;gap:8px}
+  .pri{font-size:11px;font-weight:700;padding:1px 6px;border-radius:6px;background:var(--card2);color:var(--p0);flex:none}
+  .pri.p3{color:var(--p3)} .pri.p2{color:var(--p2)} .pri.p1{color:var(--p1)}
+  .title{font-weight:600}
+  .meta{color:var(--mut);font-size:12.5px;margin-top:4px;display:flex;gap:12px;flex-wrap:wrap}
+  .empty{color:var(--mut);text-align:center;padding:40px 0}
+  .banner{background:var(--card2);border:1px dashed var(--line);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--mut);margin-top:10px}
+  a{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+  <h1>CNC · Action Items</h1>
+  <div class="sub" id="sub">Neo → brain → grouped view. Priority is visibility, not a schedule.</div>
+  <div class="bar">
+    <button class="primary" id="sync">⟳ Sync Neo now</button>
+    <button id="reload">↻ Reload items</button>
+    <input id="brainUrl" placeholder="https://second-brain.<you>.workers.dev  (optional)" />
+    <input id="brainToken" type="password" placeholder="brain AUTH_TOKEN (stays in this browser)" />
+  </div>
+  <div class="status" id="status"></div>
+</header>
+<main id="app"></main>
+
+<script>
+/* CNC Action-Items dashboard (v1).
+   - Reads action items and renders them grouped by project, then priority DESC.
+   - Data source order: (1) GET <brainUrl>/tasks if a brain URL is set and reachable;
+     (2) otherwise the embedded SAMPLE below, so the page is a working product offline.
+   - "Sync Neo now" fires the GitHub-Actions worker (workflow_dispatch) IF you set a
+     SYNC_TRIGGER below; otherwise it tells you what to wire.
+   Live data: the worker now serves GET /tasks (authed) — src/routes/tasks.ts. Set the brain
+   URL + AUTH_TOKEN above and the page reads real tasks. Tasks are seeded via POST /tasks or
+   the MCP add_task tool; the store is empty until then, so this falls back to SAMPLE. */
+
+const brainUrlEl = document.getElementById('brainUrl');
+brainUrlEl.value = localStorage.getItem('cnc_brain_url') || '';
+brainUrlEl.addEventListener('change', () => localStorage.setItem('cnc_brain_url', brainUrlEl.value.trim()));
+
+// The brain's AUTH_TOKEN. /tasks is authed (your action items are private), so the page
+// sends it as a Bearer header. Kept in this browser's localStorage only — never in the URL
+// (a URL leaks into history, proxy logs and Referer), never sent anywhere but your worker.
+const brainTokenEl = document.getElementById('brainToken');
+brainTokenEl.value = localStorage.getItem('cnc_brain_token') || '';
+brainTokenEl.addEventListener('change', () => localStorage.setItem('cnc_brain_token', brainTokenEl.value.trim()));
+
+// Optional: a GitHub Actions workflow_dispatch URL + token to make the Sync button live.
+// Leave null until you wire it (needs a fine-grained PAT with actions:write — YOUR call).
+const SYNC_TRIGGER = null; // e.g. { url: "https://api.github.com/repos/Atishyy27/neo-secondbrain-sync/actions/workflows/sync.yml/dispatches", token: "..." }
+
+const SAMPLE = [
+  {title:"Deploy the task layer to the live brain", project:"cnc/brain", priority:0, due_at:null, status:"open"},
+  {title:"Run the Neo→brain backfill before the ~end-Sept access cliff", project:"cnc/brain", priority:0, due_at:Date.parse("2026-09-28"), status:"open"},
+  {title:"Verify Delhi connecting flight + MST attendance", project:"delhi-trip", priority:1, due_at:null, status:"open"},
+  {title:"Fill TCPL training hours into the itinerary", project:"delhi-trip", priority:2, due_at:null, status:"open"},
+  {title:"Finalize + send the resume (verify CGPA, OSS PR count, title)", project:"career", priority:1, due_at:null, status:"open"},
+  {title:"Request the October internship extension", project:"career", priority:1, due_at:Date.parse("2026-10-01"), status:"open"},
+  {title:"MST-2: leave BLR ~28 Sep; exams 1/5/6 Oct (needs office sign-off)", project:"college", priority:0, due_at:Date.parse("2026-09-28"), status:"open"},
+  {title:"Chase the ICPC reimbursement (~₹10-20k)", project:"college", priority:2, due_at:null, status:"open"},
+  {title:"Email Noise re the lost right earbud (warranty/replacement)", project:"personal", priority:2, due_at:null, status:"open"},
+  {title:"Verify the Fedimint merge via gh before claiming it", project:"oss", priority:2, due_at:null, status:"open"},
+];
+
+const PRINAME = {0:"P0 do-now",1:"P1 high",2:"P2 soon",3:"P3 later"};
+const fmtDue = ms => ms ? new Date(ms).toLocaleDateString("en-GB",{day:"numeric",month:"short"}) : "";
+
+function render(items, note){
+  const app = document.getElementById('app');
+  document.getElementById('status').textContent = note || "";
+  const open = items.filter(t => t.status !== 'done' && t.status !== 'dropped' && t.status !== 'archived');
+  if(!open.length){ app.innerHTML = '<div class="empty">No open action items 🎉</div>'; return; }
+  // group by project, projects ordered by their top priority, tasks by priority DESC then soonest-due
+  const byProj = {};
+  for(const t of open){ (byProj[t.project||'inbox'] ??= []).push(t); }
+  // P0 is highest, so a project's rank is its LOWEST priority number, and both project order
+  // and task order are ascending (P0 first).
+  const projOrder = Object.keys(byProj).sort((a,b)=> Math.min(...byProj[a].map(t=>t.priority)) - Math.min(...byProj[b].map(t=>t.priority)));
+  let html = '';
+  for(const proj of projOrder){
+    const ts = byProj[proj].sort((a,b)=> a.priority - b.priority || (a.due_at??Infinity)-(b.due_at??Infinity));
+    html += `<div class="group"><h2><span>${proj}</span><span class="n">${ts.length}</span></h2>`;
+    for(const t of ts){
+      const p = 'p'+t.priority;
+      html += `<div class="task ${p}">
+        <div class="t-top"><span class="pri ${p}">P${t.priority}</span><span class="title">${escapeHtml(t.title)}</span></div>
+        <div class="meta">${t.due_at?`<span>⏱ due ${fmtDue(t.due_at)}</span>`:''}<span>${PRINAME[t.priority]}</span></div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+  app.innerHTML = html;
+}
+
+function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+async function loadItems(){
+  const url = (localStorage.getItem('cnc_brain_url')||'').replace(/\/$/,'');
+  const token = (localStorage.getItem('cnc_brain_token')||'').trim();
+  if(url){
+    const headers = {'Accept':'application/json'};
+    if(token) headers['Authorization'] = 'Bearer '+token;
+    try{
+      const r = await fetch(url+'/tasks',{headers});
+      if(r.ok){
+        const data = await r.json();
+        const tasks = (data.tasks||data);
+        if(!Array.isArray(tasks) || !tasks.length){
+          render(SAMPLE, "Brain live, but no tasks stored yet — showing sample. Seed a few via POST /tasks.");
+          return;
+        }
+        render(tasks, "Live from your brain · "+new Date().toLocaleTimeString());
+        return;
+      }
+      if(r.status===401){ render(SAMPLE, "Brain rejected the token (401) — check the AUTH_TOKEN field. Showing sample."); return; }
+      render(SAMPLE, "Brain reachable but /tasks returned "+r.status+" — showing sample.");
+      return;
+    }catch(e){ render(SAMPLE, "Brain URL unreachable — showing sample data offline."); return; }
+  }
+  render(SAMPLE, "Sample data (no brain URL set). Paste your workers.dev URL + token above once deployed.");
+}
+
+document.getElementById('reload').onclick = loadItems;
+document.getElementById('sync').onclick = async () => {
+  const s = document.getElementById('status');
+  if(!SYNC_TRIGGER){ s.textContent = "Sync not wired yet: set SYNC_TRIGGER (GitHub workflow_dispatch URL + a fine-grained PAT with actions:write). Until then, trigger the worker from the Actions tab."; return; }
+  s.textContent = "Triggering Neo→brain sync…";
+  try{
+    const r = await fetch(SYNC_TRIGGER.url,{method:'POST',headers:{'Authorization':'Bearer '+SYNC_TRIGGER.token,'Accept':'application/vnd.github+json'},body:JSON.stringify({ref:'main'})});
+    s.textContent = r.ok ? "Sync triggered ✓ — give it a minute, then Reload." : "Sync trigger failed ("+r.status+").";
+  }catch(e){ s.textContent = "Sync trigger error: "+e.message; }
+};
+
+loadItems();
+</script>
+</body>
+</html>

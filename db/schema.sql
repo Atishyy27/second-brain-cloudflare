@@ -218,6 +218,39 @@ CREATE TABLE IF NOT EXISTS maintenance_cursor (
 INSERT INTO maintenance_cursor (id, workspace_id, advanced_at) VALUES (1, '', 0)
   ON CONFLICT DO NOTHING;
 
+-- Task layer (v1). Additive like edges/insight_candidates: memory-only brains never
+-- read this table and rollback is a no-op. Must stay in step with src/db/init.ts, which
+-- creates the same objects at runtime for brains migrated before this existed.
+--
+-- Why a table of its own and not entries+tags: a task carries MUTABLE STATE (done/due/
+-- priority) that a memory does not, and it is ranked by priority, not by recall's recency
+-- decay — folding it into entries would sink important long-lead tasks under recall/math.ts
+-- and expose real commitments to the dedup path that hard-deletes near-duplicate memories.
+-- priority is a VISIBILITY signal, P0..P3 (0 = highest/do-now, 3 = lowest), not a schedule.
+-- Lower number = higher priority, the industry convention. Never pushed into Vectorize.
+CREATE TABLE IF NOT EXISTS tasks (
+  id              TEXT PRIMARY KEY,
+  title           TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'open',      -- open | done | dropped | archived (validated in app code)
+  priority        INTEGER NOT NULL DEFAULT 2,        -- P0..P3, 0=highest 3=lowest; unspecified defaults to P2 (app binds explicitly)
+  due_at          INTEGER,                            -- Unix ms, NULL = no date
+  source_entry_id TEXT,                               -- the entries.id a task was extracted from, if any
+  project         TEXT,                               -- free-text project/label, NULL = inbox
+  workspace_id    TEXT NOT NULL DEFAULT '',           -- tenancy, same semantics as entries ('' = legacy single-owner)
+  actor_id        TEXT NOT NULL DEFAULT '',
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  completed_at    INTEGER,                            -- set when status -> done
+  meta            TEXT NOT NULL DEFAULT '{}'          -- JSON escape hatch for future per-task attributes
+);
+
+-- The priority view is `WHERE workspace_id IN (..) AND status = ? ORDER BY priority ASC, due_at`
+-- (P0 first). Without an ordered path SQLite builds a temp b-tree over the whole table before
+-- the LIMIT, the same shape idx_edges_weight and idx_insight_candidates_queue exist to avoid.
+-- The index is declared priority DESC and SQLite reverse-scans it for the ASC view; the
+-- direction is physical layout, not priority meaning, so no rebuild is needed on live brains.
+CREATE INDEX IF NOT EXISTS idx_tasks_view ON tasks(workspace_id, status, priority DESC, due_at);
+
 -- Capsule-only index: missing project ids never scan ordinary memories.
 CREATE INDEX IF NOT EXISTS idx_entries_capsule ON entries(workspace_id, id)
 WHERE instr(lower(tags), '"capsule:') > 0;

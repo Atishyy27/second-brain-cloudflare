@@ -57,6 +57,9 @@ const LEGACY_SHAPES: Record<string, string> = {
   // target_user_id and workspace_id a release later.
   admin_events: `CREATE TABLE admin_events (id TEXT PRIMARY KEY, actor_id TEXT NOT NULL DEFAULT '', event TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL)`,
   maintenance_cursor: `CREATE TABLE maintenance_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), workspace_id TEXT NOT NULL DEFAULT '', advanced_at INTEGER NOT NULL DEFAULT 0)`,
+  // v1 task layer. Never widened since it shipped, so this is today's shape — which is
+  // what makes the FIRST column ever added to tasks fail here rather than reach only new brains.
+  tasks: `CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', priority INTEGER NOT NULL DEFAULT 0, due_at INTEGER, source_entry_id TEXT, project TEXT, workspace_id TEXT NOT NULL DEFAULT '', actor_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER, meta TEXT NOT NULL DEFAULT '{}')`,
 };
 
 /** `-- …` line comments, without mistaking a "--" inside a string literal for one. */

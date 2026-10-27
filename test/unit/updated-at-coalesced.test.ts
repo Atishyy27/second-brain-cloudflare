@@ -81,11 +81,12 @@ const inAny = (i: number, ranges: [number, number][]) => ranges.some(([a, b]) =>
  * target, not a SET assignment target, and not wrapped in COALESCE(updated_at, created_at).
  */
 function rawSqlReads(sql: string, relPath: string): Finding[] {
-  // Only `edges` statements are exempt by table — that column is declared NOT NULL, so it
-  // can never be NULL. A fragment naming NO table is NOT exempt: `ORDER BY updated_at
-  // DESC` assigned to a constant and interpolated into a query elsewhere is the single
-  // most likely way this bug gets reintroduced, and it names no table at all.
-  if (/\bedges\b/.test(sql) && !/\bentries\b/.test(sql)) return [];
+  // `edges` and `tasks` statements are exempt by table — both declare updated_at NOT NULL,
+  // so it can never be NULL and needs no created_at fallback. A fragment naming NO table is
+  // NOT exempt: `ORDER BY updated_at DESC` assigned to a constant and interpolated into a
+  // query elsewhere is the single most likely way this bug gets reintroduced, and it names
+  // no table at all.
+  if (/\b(?:edges|tasks)\b/.test(sql) && !/\bentries\b/.test(sql)) return [];
 
   const declarations = spans(sql, /ADD\s+COLUMN\s+updated_at/gi);
   // COALESCE or the equivalent IFNULL, with or without a table qualifier — a JOIN forces

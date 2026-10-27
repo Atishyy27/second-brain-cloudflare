@@ -26,6 +26,8 @@ import { renderRecallText, memoryHeader } from "../recall/render";
 import { RECALL_OUTPUT_BUDGET, SNIPPET_MAX_CHARS, snippetOf, truncationNote } from "../recall/snippet";
 import { buildPromptCapsule } from "../prompt-capsule/build";
 import { PROMPT_CAPSULE_MCP_SCHEMA } from "../prompt-capsule/types";
+import { createTask, listTasks, completeTask, updateTask } from "../tasks/store";
+import { TASK_STATUS_VALUES, TASK_PRIORITY_MIN, TASK_PRIORITY_MAX, type Task } from "../tasks/types";
 
 // Asking the calling model for this is the whole point: it has already read the content
 // in order to decide to store it, so the judgment is free, and it is a far better
@@ -837,6 +839,124 @@ export function buildMcpServer(env: Env, ctx: ExecutionContext, identity?: Ident
         .join("\n");
       return { content: [{ type: "text", text }] };
     }
+  );
+
+  // ── tasks (v1) ────────────────────────────────────────────────────────────
+  // A task is a commitment with mutable state, stored apart from memories and ranked by
+  // priority, not recall relevance. These four tools are the CRUD surface; extract_tasks
+  // (transcript -> deduped tasks) lands in a later pass. Every read/write is scoped to the
+  // caller's workspace via the same writeCtx the memory tools use.
+  const renderTask = (t: Task): string => {
+    const due = t.dueAt
+      ? ` · due ${new Date(t.dueAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}`
+      : "";
+    const project = t.project ? ` #${t.project}` : "";
+    const state = t.status === "open" ? "" : ` · ${t.status}`;
+    return `- [P${t.priority}]${project} ${t.title}${due}${state} (id: ${t.id})`;
+  };
+
+  server.registerTool(
+    "add_task",
+    {
+      description:
+        "Create a task in your second brain — a commitment to act on, kept separate from memories and shown by priority. "
+        + "Use it when the user states something they need to do, not merely a fact to remember. priority follows the "
+        + "P0..P3 convention: 0 = P0 (highest, do-now), 3 = P3 (lowest); LOWER number = higher priority, like everywhere "
+        + "else. Omit it and the task defaults to P2. It is a visibility signal, not a schedule; set due_at only when there "
+        + "is a real date. Pass source_entry_id when the task came from a specific memory (its id from recall or list_recent).",
+      inputSchema: {
+        title: z.string().min(1).describe("What needs doing, in a few words — the imperative, e.g. \"send Nandini the finance deck\""),
+        priority: z.number().int().min(TASK_PRIORITY_MIN).max(TASK_PRIORITY_MAX).optional().describe("P0..P3: 0 = P0 (highest, do-now), 3 = P3 (lowest). Lower = more urgent. Default P2. Not a schedule."),
+        due_at: z.number().int().optional().describe("Unix milliseconds for a real deadline. Omit when there is no date."),
+        project: z.string().optional().describe("Optional project/label to group the task under; omit for the inbox."),
+        source_entry_id: z.string().optional().describe("The memory id this task was extracted from, if any."),
+      },
+    },
+    async ({ title, priority, due_at, project, source_entry_id }) => {
+      const task = await createTask(
+        env,
+        { title, priority, dueAt: due_at ?? null, project: project ?? null, sourceEntryId: source_entry_id ?? null },
+        writeCtx,
+      );
+      return { content: [{ type: "text", text: `Task created (id: ${task.id}).\n${renderTask(task)}` }] };
+    },
+  );
+
+  server.registerTool(
+    "list_tasks",
+    {
+      description:
+        "List tasks by priority — the do-next view. Returns open tasks by default, highest priority first, then "
+        + "soonest due. Use it to answer \"what should I do\" or to find a task's id before completing or editing it. "
+        + "Pass status to see done/dropped/archived tasks, or project to scope to one group.",
+      inputSchema: {
+        status: z.enum([...TASK_STATUS_VALUES] as [string, ...string[]]).optional().describe("open (default) | done | dropped | archived"),
+        project: z.string().optional().describe("Only tasks in this project/label."),
+        limit: z.number().int().min(1).max(200).optional().describe("How many to return (default 50, max 200)."),
+      },
+    },
+    async ({ status, project, limit }) => {
+      const tasks = await listTasks(env, writeCtx, {
+        status: status as Task["status"] | undefined,
+        project,
+        limit,
+      });
+      if (!tasks.length) {
+        return { content: [{ type: "text", text: `No ${status ?? "open"} tasks${project ? ` in ${project}` : ""}.` }] };
+      }
+      return { content: [{ type: "text", text: tasks.map(renderTask).join("\n") }] };
+    },
+  );
+
+  server.registerTool(
+    "complete_task",
+    {
+      description:
+        "Mark a task done. It keeps its record (nothing is deleted) and drops out of the default open view. "
+        + "Get the task id from list_tasks first.",
+      inputSchema: {
+        id: z.string().describe("Task id — from list_tasks"),
+      },
+    },
+    async ({ id }) => {
+      const task = await completeTask(env, id, writeCtx);
+      if (!task) return { content: [{ type: "text", text: `No task found with id: ${id}` }] };
+      return { content: [{ type: "text", text: `Task done (id: ${task.id}).\n${renderTask(task)}` }] };
+    },
+  );
+
+  server.registerTool(
+    "update_task",
+    {
+      description:
+        "Change a task's fields — title, priority, due date, project, or status. Only the fields you pass change. "
+        + "Use it to re-prioritise, reschedule, drop, or re-open a task. Get the id from list_tasks first. "
+        + "To simply finish a task, prefer complete_task.",
+      inputSchema: {
+        id: z.string().describe("Task id — from list_tasks"),
+        title: z.string().min(1).optional().describe("New title."),
+        priority: z.number().int().min(TASK_PRIORITY_MIN).max(TASK_PRIORITY_MAX).optional().describe("New priority, P0..P3: 0 = P0 (highest), 3 = P3 (lowest). Lower = more urgent."),
+        due_at: z.number().int().nullable().optional().describe("New Unix-ms deadline, or null to clear the date."),
+        project: z.string().nullable().optional().describe("New project/label, or null to move to the inbox."),
+        status: z.enum([...TASK_STATUS_VALUES] as [string, ...string[]]).optional().describe("open | done | dropped | archived"),
+      },
+    },
+    async ({ id, title, priority, due_at, project, status }) => {
+      const task = await updateTask(
+        env,
+        id,
+        {
+          title,
+          priority,
+          dueAt: due_at,
+          project,
+          status: status as Task["status"] | undefined,
+        },
+        writeCtx,
+      );
+      if (!task) return { content: [{ type: "text", text: `No task found with id: ${id}` }] };
+      return { content: [{ type: "text", text: `Task updated (id: ${task.id}).\n${renderTask(task)}` }] };
+    },
   );
 
   return server;
